@@ -6,7 +6,8 @@
     2. Tener un endpoint para agregar un usuario
     3. Otro endpoint para obtener la información
     4. La información que se mande y que se reciba tiene que empaquetarse en un JSON
-    https://www.youtube.com/watch?v=5BIylxkudaE
+Me voy a basar en el siguiente video:
+https://www.youtube.com/watch?v=5BIylxkudaE
 */
 
 package main
@@ -18,7 +19,7 @@ import (
 )
 
 func main() {
-	srv := api.NewServer()
-	http.ListenAndServe(":8080", srv)
+	server := api.NewServer()
+	http.ListenAndServe(":8080", server)
 
 }

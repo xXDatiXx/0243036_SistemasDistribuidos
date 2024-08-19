@@ -1,0 +1,15 @@
+### List hotwheels items
+GET http://localhost:8080/usuario
+
+### Create new hotwheel item
+POST http://localhost:8080/usuario
+Content-Type: application/json
+
+{
+    "name": "Diego",
+    "apellido": "Arenas",
+    "edad": 22
+}
+
+### Remove hotwheel item
+DELETE http://localhost:8080/usuario/7e454e84-781c-4458-b6e6-900d743e646c
