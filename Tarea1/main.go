@@ -12,9 +12,13 @@
 package main
 
 import (
-	"fmt"
+	"net/http"
+
+	"github.com/dati/tarea1/api" // Importar el paquete api
 )
 
 func main() {
-	fmt.Println("Hello, World!")
+	srv := api.NewServer()
+	http.ListenAndServe(":8080", srv)
+
 }
