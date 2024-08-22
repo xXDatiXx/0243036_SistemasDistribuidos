@@ -1,15 +1,10 @@
-### List hotwheels items
-GET http://localhost:8080/usuario
-
-### Create new hotwheel item
-POST http://localhost:8080/usuario
+### Crear un nuevo record en el commit log (codificado en base64)
+POST http://localhost:8080/record
 Content-Type: application/json
 
 {
-    "name": "Diego",
-    "apellido": "Arenas",
-    "edad": 22
+    "value": "SGVsbG8gV29ybGQ="
 }
 
-### Remove hotwheel item
-DELETE http://localhost:8080/usuario/7e454e84-781c-4458-b6e6-900d743e646c
+### Obtener el record del commit log por su offset
+GET http://localhost:8080/record/1

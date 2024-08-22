@@ -1,109 +1,92 @@
 package api // Nombre del paquete
 
-import ( // Importar paquetes
-	"encoding/json" // Importar el paquete json, nos ayuda a codificar y decodificar JSON
+import (
+	"encoding/json"
+	"fmt"
 	"net/http"
+	"sync"
 
-	"github.com/google/uuid" // Importar el paquete uuid, nos ayuda a generar un id único
 	"github.com/gorilla/mux" // Importar el paquete mux, nos ayuda a manejar rutas
 )
 
-type Item struct { // Definir una estructura
-	Name     string    `json:"name"`     // Nombre del item
-	Apellido string    `json:"apellido"` // Precio del item
-	Edad     int       `json:"edad"`     // Edad del item
-	ID       uuid.UUID `json:"id"`       // ID del item
+// Definición del Record, que representa cada registro en el log
+type Record struct {
+	Value  []byte `json:"value"`  // Valor del registro en bytes
+	Offset uint64 `json:"offset"` // Offset del registro
 }
 
-type Server struct { // Definir una estructura
+// Definición del Log, que representa el commit log
+type Log struct {
+	mu      sync.Mutex // Mutex para asegurar acceso concurrente seguro
+	records []Record   // Slice que almacena los registros
+}
+
+// Definición de un servidor que manejará los registros
+type Server struct {
 	*mux.Router // Agregar un router
-
-	users []Item // Lista de items
+	log         *Log
 }
 
-func NewServer() *Server { // Define una función llamada NewServer que crea y retorna un puntero a un nuevo Server.
+func NewServer() *Server { // Crea y retorna un nuevo servidor
 	s := &Server{
-		// Crea una nueva instancia de la estructura Server y la asigna a la variable s.
 		Router: mux.NewRouter(),
-		// Inicializa el campo Router de la estructura Server con un nuevo enrutador (Router) de la librería mux.
-		users: []Item{},
-		// Inicializa el campo users
+		log:    &Log{records: []Record{}}, // Inicializa el log
 	}
 
-	s.routes()
+	s.routes() // Configura las rutas del servidor
 	return s
 }
 
-func (s *Server) routes() { // Crear una función que se usa oara e usa para configurar las rutas HTTP que el servidor manejará.
-	s.HandleFunc("/usuario", s.createUserItem()).Methods(http.MethodPost)        // Crear un endpoint para agregar un item
-	s.HandleFunc("/usuario", s.listUserItems()).Methods(http.MethodGet)          // Crear un endpoint para obtener la lista de items
-	s.HandleFunc("/usuario/{id}", s.removeUserItem()).Methods(http.MethodDelete) // Crear un endpoint para eliminar un item
+func (s *Server) routes() { // Define las rutas que el servidor manejará
+	s.HandleFunc("/record", s.appendRecord()).Methods(http.MethodPost)      // Endpoint para agregar un nuevo record
+	s.HandleFunc("/record/{offset}", s.getRecord()).Methods(http.MethodGet) // Endpoint para obtener un record por su offset
 }
 
-func (s *Server) createUserItem() http.HandlerFunc { // Esta función es un método de la estructura Server.
-	// Retorna una función que maneja una petición HTTP (http.HandlerFunc).
-	return func(w http.ResponseWriter, r *http.Request) { // La función interna es la que efectivamente manejará las peticiones HTTP.
-		var i Item // Se declara una variable de tipo Item donde se almacenarán los datos recibidos en la petición.
-
-		if err := json.NewDecoder(r.Body).Decode(&i); err != nil { // Se decodifica el cuerpo de la petición (r.Body) desde JSON a la estructura Item.
-			// Si ocurre un error durante la decodificación, se maneja el error:
-			http.Error(w, err.Error(), http.StatusBadRequest) // Se responde con un código de estado HTTP 400 (Bad Request) y el mensaje de error.
-			return
-			// Se finaliza la ejecución de la función en caso de error.
-		}
-
-		i.ID = uuid.New() // Se genera un nuevo UUID para el campo ID del item y se asigna a i.ID.
-
-		s.users = append(s.users, i) // Se añade el nuevo item `i` al slice `shoppingItems` de la estructura Server.
-
-		w.Header().Set("Content-Type", "application/json") // Se establece el encabezado de la respuesta HTTP, indicando que el contenido es de tipo JSON.
-
-		if err := json.NewEncoder(w).Encode(i); err != nil { // Codifica el item `i` a JSON y se escribe en la respuesta `w`.
-			// Si ocurre un error durante la codificación, se maneja el error:
-			http.Error(w, err.Error(), http.StatusInternalServerError) // Responde con un código de estado HTTP 500 (Internal Server Error) y el mensaje de error.
-			return
-			// Finaliza la ejecución de la función en caso de error.
-		}
-	}
-}
-
-func (s *Server) listUserItems() http.HandlerFunc {
+func (s *Server) appendRecord() http.HandlerFunc { // Método para manejar la creación de un nuevo record
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		// Establece el encabezado de la respuesta HTTP para indicar que el contenido es JSON.
+		var rec Record
 
-		if err := json.NewEncoder(w).Encode(s.users); err != nil {
-			// Codifica la lista de items (shoppingItems) a JSON y la escribe en la respuesta.
-
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			// Responde con un código de estado HTTP 500 (Internal Server Error) y el mensaje de error.
-			return
-		}
-	}
-}
-
-func (s *Server) removeUserItem() http.HandlerFunc { // Retorna una función que maneja una petición HTTP para eliminar un item por su ID.
-	return func(w http.ResponseWriter, r *http.Request) {
-		idStr, _ := mux.Vars(r)["id"] // Obtiene el ID del item desde las variables de la URL (path parameters).
-
-		id, err := uuid.Parse(idStr) // Convierte el ID de string a UUID.
-
-		if err != nil {
+		if err := json.NewDecoder(r.Body).Decode(&rec); err != nil { // Decodifica el JSON a una estructura Record
 			http.Error(w, err.Error(), http.StatusBadRequest)
-			// Si falla, responde con un código HTTP 400 (Bad Request) y el mensaje de error.
 			return
 		}
 
-		for i, item := range s.users {
-			// Recorre la lista de items para encontrar el que tiene el ID especificado.
+		s.log.mu.Lock() // Asegura acceso exclusivo al log
+		defer s.log.mu.Unlock()
 
-			if item.ID == id {
-				// Si encuentra el item con el ID coincidente:
+		rec.Offset = uint64(len(s.log.records))    // Calcula el offset basado en la longitud actual de los registros
+		s.log.records = append(s.log.records, rec) // Añade el nuevo record al log
 
-				s.users = append(s.users[:i], s.users[i+1:]...)
-				// Elimina el item de la lista utilizando una técnica de slicing.
-				break
-			}
+		if err := json.NewEncoder(w).Encode(rec); err != nil { // Codifica y envía el record como respuesta
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+}
+
+func (s *Server) getRecord() http.HandlerFunc { // Método para manejar la obtención de un record por su offset
+	return func(w http.ResponseWriter, r *http.Request) {
+		offsetStr := mux.Vars(r)["offset"] // Obtiene el offset de los parámetros de la URL
+
+		var offset uint64
+		if _, err := fmt.Sscanf(offsetStr, "%d", &offset); err != nil {
+			http.Error(w, "Invalid offset", http.StatusBadRequest)
+			return
+		}
+
+		s.log.mu.Lock() // Asegura acceso exclusivo al log
+		defer s.log.mu.Unlock()
+
+		if offset >= uint64(len(s.log.records)) {
+			http.Error(w, "Record not found", http.StatusNotFound)
+			return
+		}
+
+		record := s.log.records[offset] // Obtiene el record basado en el offset
+
+		if err := json.NewEncoder(w).Encode(record); err != nil { // Codifica y envía el record como respuesta
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
 		}
 	}
 }

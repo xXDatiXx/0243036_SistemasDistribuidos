@@ -8,6 +8,7 @@
     4. La información que se mande y que se reciba tiene que empaquetarse en un JSON
 Me voy a basar en el siguiente video:
 https://www.youtube.com/watch?v=5BIylxkudaE
+http://localhost:8080/record
 */
 
 package main
