@@ -5,8 +5,12 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
+	"os"
 
 	"github.com/gorilla/mux" // Importar el paquete mux, nos ayuda a manejar rutas
+	"github.com/dati/store" // Importar el paquete store.go
+	"github.com/dati/indice" // Importar el paquete index.go
+
 )
 
 // Definición del Record, que representa cada registro en el log
@@ -24,69 +28,102 @@ type Log struct {
 // Definición de un servidor que manejará los registros
 type Server struct {
 	*mux.Router // Agregar un router
-	log         *Log
+    log *store.Store // Usa estructura Store
+	idx *index.Index // Agregar un índice
 }
 
-func NewServer() *Server { // Crea y retorna un nuevo servidor
-	s := &Server{
-		Router: mux.NewRouter(),
-		log:    &Log{records: []Record{}}, // Inicializa el log
-	}
+func NewServer() *Server {
+    // Inicializa el archivo de registros
+    logFile, err := os.OpenFile("store.log", os.O_CREATE|os.O_APPEND|os.O_RDWR, 0666)
+    if err != nil {
+        panic(err)
+    }
 
-	s.routes() // Configura las rutas del servidor
-	return s
+    st, err := store.NewStore(logFile)
+    if err != nil {
+        panic(err)
+    }
+
+    // Inicializa el archivo de índice
+    indexFile, err := os.OpenFile("store.index", os.O_CREATE|os.O_RDWR, 0666)
+    if err != nil {
+        panic(err)
+    }
+
+    idx, err := index.NewIndex(indexFile)
+    if err != nil {
+        panic(err)
+    }
+
+    s := &Server{
+        Router: mux.NewRouter(),
+        log:    st,
+        idx:    idx,
+    }
+
+    s.routes()
+    return s
 }
 
-func (s *Server) routes() { // Define las rutas que el servidor manejará
-	s.HandleFunc("/record", s.appendRecord()).Methods(http.MethodPost)      // Endpoint para agregar un nuevo record
-	s.HandleFunc("/record/{offset}", s.getRecord()).Methods(http.MethodGet) // Endpoint para obtener un record por su offset
+func (s *Server) appendRecord() http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        var rec store.Record
+
+        if err := json.NewDecoder(r.Body).Decode(&rec); err != nil {
+            http.Error(w, err.Error(), http.StatusBadRequest)
+            return
+        }
+
+        // Escribe en el store
+        n, pos, err := s.log.Append(rec.Value)
+        if err != nil {
+            http.Error(w, err.Error(), http.StatusInternalServerError)
+            return
+        }
+
+        // Actualiza el índice con el nuevo registro
+        if err := s.idx.Write(uint32(pos), n); err != nil {
+            http.Error(w, err.Error(), http.StatusInternalServerError)
+            return
+        }
+
+        rec.Offset = pos
+
+        if err := json.NewEncoder(w).Encode(rec); err != nil {
+            http.Error(w, err.Error(), http.StatusInternalServerError)
+            return
+        }
+    }
 }
 
-func (s *Server) appendRecord() http.HandlerFunc { // Método para manejar la creación de un nuevo record
-	return func(w http.ResponseWriter, r *http.Request) {
-		var rec Record
+func (s *Server) getRecord() http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        offsetStr := mux.Vars(r)["offset"]
 
-		if err := json.NewDecoder(r.Body).Decode(&rec); err != nil { // Decodifica el JSON a una estructura Record
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
+        var offset uint64
+        if _, err := fmt.Sscanf(offsetStr, "%d", &offset); err != nil {
+            http.Error(w, "Invalid offset", http.StatusBadRequest)
+            return
+        }
 
-		s.log.mu.Lock() // Asegura acceso exclusivo al log
-		defer s.log.mu.Unlock()
+        // Lee la posición desde el índice
+        _, pos, err := s.idx.Read(int64(offset))
+        if err != nil {
+            http.Error(w, "Record not found", http.StatusNotFound)
+            return
+        }
 
-		rec.Offset = uint64(len(s.log.records))    // Calcula el offset basado en la longitud actual de los registros
-		s.log.records = append(s.log.records, rec) // Añade el nuevo record al log
+        // Usa la posición para leer el registro desde el store
+        rec, err := s.log.Read(pos)
+        if err != nil {
+            http.Error(w, "Record not found", http.StatusNotFound)
+            return
+        }
 
-		if err := json.NewEncoder(w).Encode(rec); err != nil { // Codifica y envía el record como respuesta
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-	}
+        if _, err := w.Write(rec); err != nil {
+            http.Error(w, err.Error(), http.StatusInternalServerError)
+            return
+        }
+    }
 }
 
-func (s *Server) getRecord() http.HandlerFunc { // Método para manejar la obtención de un record por su offset
-	return func(w http.ResponseWriter, r *http.Request) {
-		offsetStr := mux.Vars(r)["offset"] // Obtiene el offset de los parámetros de la URL
-
-		var offset uint64
-		if _, err := fmt.Sscanf(offsetStr, "%d", &offset); err != nil {
-			http.Error(w, "Invalid offset", http.StatusBadRequest)
-			return
-		}
-
-		s.log.mu.Lock() // Asegura acceso exclusivo al log
-		defer s.log.mu.Unlock()
-
-		if offset >= uint64(len(s.log.records)) {
-			http.Error(w, "Record not found", http.StatusNotFound)
-			return
-		}
-
-		record := s.log.records[offset] // Obtiene el record basado en el offset
-
-		if err := json.NewEncoder(w).Encode(record); err != nil { // Codifica y envía el record como respuesta
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-	}
-}

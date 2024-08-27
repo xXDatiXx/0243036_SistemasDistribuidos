@@ -16,7 +16,7 @@ package main
 import (
 	"net/http"
 
-	"github.com/dati/tarea1/api" // Importar el paquete api
+	"github.com/dati/api" // Importar el paquete api
 )
 
 func main() {
