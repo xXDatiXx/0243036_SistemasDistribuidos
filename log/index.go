@@ -1,4 +1,4 @@
-package index
+package log
 
 import (
 	"encoding/binary"
@@ -16,15 +16,23 @@ var (
 	initialSize = uint64(1024)        // Tamaño inicial predeterminado si el archivo está vacío
 )
 
+// Estructura de configuración para el índice
+type Config struct {
+	Segment struct {
+		MaxIndexBytes uint64 // Máximo número de bytes para el índice
+	}
+}
+
 // Estructura del índice
 type Index struct {
 	file *os.File    // Archivo donde se almacena el índice
 	mmap gommap.MMap // Mapeo del archivo a memoria
 	size uint64      // Tamaño actual utilizado del índice
+	max  uint64      // Tamaño máximo del índice
 }
 
-// NewIndex crea un nuevo índice basado en un archivo
-func NewIndex(f *os.File) (*Index, error) {
+// newIndex crea un nuevo índice basado en un archivo y configuración
+func newIndex(f *os.File, c Config) (*Index, error) {
 	// 1. Obtener el tamaño del archivo que vamos a indexar
 	fi, err := f.Stat()
 	if err != nil {
@@ -54,11 +62,20 @@ func NewIndex(f *os.File) (*Index, error) {
 		file: f,
 		mmap: mmap,
 		size: size,
+		max:  c.Segment.MaxIndexBytes, // Utilizar el tamaño máximo de la configuración
 	}, nil
 }
 
 // Función para leer un registro desde el índice
 func (i *Index) Read(in int64) (out uint32, pos uint64, err error) {
+	// Si `in` es -1, leer el último registro
+	if in == -1 {
+		if i.size == 0 {
+			return 0, 0, fmt.Errorf("no hay registros en el índice")
+		}
+		in = int64(i.size/entWidth) - 1
+	}
+
 	// 1. Obtener el lugar en donde queremos leer
 	entryStart := uint64(in) * entWidth
 
@@ -80,8 +97,8 @@ func (i *Index) Read(in int64) (out uint32, pos uint64, err error) {
 
 // Función para escribir un registro en el índice
 func (i *Index) Write(off uint32, pos uint64) error {
-	// 1. Obtener el tamaño actual del índice y validar que tenemos espacio para escribir
-	if i.size+entWidth > uint64(len(i.mmap)) {
+	// 1. Validar que tenemos espacio para escribir
+	if i.size+entWidth > i.max {
 		return fmt.Errorf("no hay suficiente espacio en el índice para escribir una nueva entrada")
 	}
 
@@ -120,4 +137,9 @@ func (i *Index) Close() error {
 	}
 
 	return nil
+}
+
+// Name devuelve el nombre del archivo del índice
+func (i *Index) Name() string {
+	return i.file.Name()
 }

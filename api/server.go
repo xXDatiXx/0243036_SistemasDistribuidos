@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"os"
 
-	index "github.com/dati/indice"
-	"github.com/dati/store"
+	index "github.com/dati/log"
+	store "github.com/dati/log"
 
 	"github.com/gorilla/mux"
 )
@@ -36,7 +36,12 @@ func NewServer() *Server {
 		log.Fatalf("Error al abrir el archivo de índice: %v", err)
 	}
 
-	idx, err := index.NewIndex(indexFile)
+	// Crear la configuración para el índice
+	config := log.Config{}
+	config.Segment.MaxIndexBytes = 1024 // Configura el tamaño máximo del índice (puedes ajustar esto según lo necesites)
+
+	// Pasar el archivo de índice y la configuración a newIndex
+	idx, err := log.newIndex(indexFile, config)
 	if err != nil {
 		log.Fatalf("Error al inicializar el índice: %v", err)
 	}
