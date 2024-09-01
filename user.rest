@@ -3,8 +3,10 @@ POST http://localhost:8080/record
 Content-Type: application/json
 
 {
-    "value": "SGVsbG8gV29ybGQb"
+    "value": "SGVsbG8gV29ybGQ=",
+    "offset": 0
 }
+
 
 ### Obtener el record del commit log por su offset
 GET http://localhost:8080/record/0
