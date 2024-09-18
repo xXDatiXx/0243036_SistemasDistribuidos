@@ -1,25 +1,44 @@
-/*
-1. Crear un modulo de go, será nuestro principal repositorio de trabajo
-2. Crear un archivo llamado server.go
-3. En el server.go
-    1. Agregar lógica para recibir peticiones http
-    2. Tener un endpoint para agregar un usuario
-    3. Otro endpoint para obtener la información
-    4. La información que se mande y que se reciba tiene que empaquetarse en un JSON
-Me voy a basar en el siguiente video:
-https://www.youtube.com/watch?v=5BIylxkudaE
-http://localhost:8080/record
-*/
+// localhost:8080
 
 package main
 
 import (
-	"net/http"
+	"fmt"
+	"net"
 
-	"github.com/dati/api" // Importar el paquete api
+	api "github.com/dati/api/v1"
+	log "github.com/dati/log"
+	"github.com/dati/server"
+	"google.golang.org/grpc"
 )
 
 func main() {
-	server := api.NewServer()
-	http.ListenAndServe(":8080", server)
+	// Escuchar en el puerto 8080
+	listener, err := net.Listen("tcp", ":8080")
+	if err != nil {
+		fmt.Printf("Error al iniciar el listener: %v", err)
+	}
+
+	// Crear un nuevo CommitLog
+	commitLog, err := log.NewLog("/tmp/commitlog", log.Config{})
+	if err != nil {
+		fmt.Printf("Error al inicializar el commit log: %v", err)
+	}
+
+	// Inicializar el servidor gRPC
+	grpcServer, err := server.NewGRPCServer(commitLog)
+	if err != nil {
+		fmt.Printf("Error al inicializar el servidor gRPC: %v", err)
+	}
+
+	// Crear una nueva instancia del servidor gRPC
+	s := grpc.NewServer()
+	api.RegisterLogServer(s, grpcServer)
+
+	fmt.Println("Servidor gRPC escuchando en el puerto 8080...")
+
+	// Iniciar el servidor gRPC
+	if err := s.Serve(listener); err != nil {
+		fmt.Printf("Error al iniciar el servidor gRPC: %v", err)
+	}
 }

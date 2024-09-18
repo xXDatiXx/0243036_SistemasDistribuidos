@@ -7,113 +7,102 @@ import (
 	"sync"
 )
 
-// Record representa cada registro almacenado en el log.
-// Contiene un valor en bytes y un offset que indica la posición del registro en el log.
-type Record struct {
-	Value  []byte `json:"value"`  // Valor del registro en bytes
-	Offset uint64 `json:"offset"` // Offset del registro dentro del log
-}
-
-// Variable global para la codificación y el tamaño de cada registro en bytes.
 var (
-	enc      = binary.BigEndian // Usamos codificación BigEndian para escribir datos binarios en el archivo.
-	lenWidth = 8                // Ancho en bytes utilizado para almacenar el tamaño de cada registro.
+	enc = binary.BigEndian // Define el orden de bytes como BigEndian
 )
 
-// Store representa el almacenamiento persistente donde se guardan los registros.
-// Está asociado con un archivo en el sistema de archivos.
+const (
+	lenWidth = 8 // Define el ancho del campo de longitud en bytes
+)
+
+// Store representa el almacenamiento de registros en un archivo.
 type Store struct {
 	*os.File               // Archivo donde se almacenan los registros
-	mu       sync.Mutex    // Mutex para asegurar acceso concurrente seguro
-	buf      *bufio.Writer // Buffer de escritura para mejorar el rendimiento al escribir en el archivo
+	mu       sync.Mutex    // Mutex para proteger el acceso concurrente
+	buf      *bufio.Writer // Buffer para escritura eficiente
 	size     uint64        // Tamaño actual del archivo en bytes
 }
 
-// NewStore es un constructor que inicializa una nueva instancia de Store.
-// Abre el archivo asociado y determina su tamaño actual.
-func NewStore(f *os.File) (*Store, error) {
-	// Seek mueve el puntero del archivo al final para determinar su tamaño.
-	size, err := f.Seek(0, os.SEEK_END)
+// newStore crea una nueva instancia de Store a partir de un archivo dado.
+func newStore(f *os.File) (*Store, error) {
+	file_info, err := f.Stat() // Obtiene información del archivo
 	if err != nil {
-		return nil, err
+		return nil, err // Retorna error si falla
 	}
 	return &Store{
-		File: f,
-		size: uint64(size),       // Establece el tamaño del archivo
-		buf:  bufio.NewWriter(f), // Inicializa el buffer de escritura
-	}, nil
+		File: f,                        // Asigna el archivo al Store
+		buf:  bufio.NewWriter(f),       // Crea un nuevo buffer para el archivo
+		size: uint64(file_info.Size()), // Asigna el tamaño del archivo al Store
+	}, nil // Retorna la instancia de Store
 }
 
-// Append agrega un nuevo registro al store.
-// Escribe el tamaño del registro seguido por el registro.
-// Devuelve el número de bytes escritos y la posición donde se almacenó el registro.
-func (s *Store) Append(p []byte) (n uint64, pos uint64, err error) {
-	s.mu.Lock() // Asegura que solo una goroutine pueda escribir en el store a la vez.
-	defer s.mu.Unlock()
-
-	pos = s.size // Establece la posición actual como el punto donde se escribirá el nuevo registro.
-	// Escribe el tamaño del registro en el buffer.
-	if err := binary.Write(s.buf, enc, uint64(len(p))); err != nil {
-		return 0, 0, err
-	}
-	// Escribe el registro en sí en el buffer.
-	n1, err := s.buf.Write(p)
-	if err != nil {
-		return 0, 0, err
+// Read lee un registro desde el Store basado en el offset dado.
+func (s *Store) Read(in uint64) (out []byte, err error) {
+	if err := s.buf.Flush(); err != nil { // Vacía el buffer al archivo
+		return nil, err // Retorna error si falla
 	}
 
-	// El tamaño total incluye tanto el tamaño del registro como los datos.
-	n = uint64(n1) + uint64(lenWidth)
-	s.size += n // Actualiza el tamaño del store
+	value_size_bytes := make([]byte, lenWidth) // Crea un buffer para el tamaño del valor
 
-	return n, pos, nil
+	if _, err := s.File.ReadAt(value_size_bytes, int64(in)); err != nil { // Lee el tamaño del valor desde el archivo
+		return nil, err // Retorna error si falla
+	}
+
+	value_size := enc.Uint64(value_size_bytes) // Decodifica el tamaño del valor
+
+	value := make([]byte, value_size) // Crea un buffer para el valor
+
+	if _, err := s.File.ReadAt(value, int64(in+lenWidth)); err != nil { // Lee el valor desde el archivo
+		return nil, err // Retorna error si falla
+	}
+
+	return value, nil // Retorna el valor leído
 }
 
-// Read lee un registro del store desde una posición dada.
-// Devuelve los datos leídos como un slice de bytes.
-func (s *Store) Read(pos uint64) ([]byte, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	// Asegura que cualquier dato pendiente en el buffer se escriba en el archivo.
-
-	size := make([]byte, lenWidth)
-	// Lee el tamaño del registro desde la posición especificada en el store.
-	if _, err := s.File.ReadAt(size, int64(pos)); err != nil {
-		return nil, err
-	}
-	// Lee el registro completo basado en el tamaño obtenido.
-	p := make([]byte, enc.Uint64(size))
-	if _, err := s.File.ReadAt(p, int64(pos+uint64(lenWidth))); err != nil {
-		return nil, err
-	}
-
-	return p, nil
-}
-
-// ReadAt es una función que permite leer directamente del store desde una posición específica.
-// Es útil cuando se necesita leer datos en ubicaciones específicas sin procesar todo el registro.
+// ReadAt lee datos desde el Store en una posición específica.
 func (s *Store) ReadAt(p []byte, off int64) (int, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	// Asegura que cualquier dato pendiente en el buffer se escriba en el archivo antes de leer.
-	if err := s.buf.Flush(); err != nil {
-		return 0, err
+	s.mu.Lock()                           // Bloquea el mutex para acceso exclusivo
+	defer s.mu.Unlock()                   // Desbloquea el mutex al salir de la función
+	if err := s.buf.Flush(); err != nil { // Vacía el buffer al archivo
+		return 0, err // Retorna error si falla
 	}
-	// Lee los datos desde la posición especificada en el archivo.
-	return s.File.ReadAt(p, off)
+	return s.File.ReadAt(p, int64(off)) // Lee datos desde el archivo en la posición especificada
 }
 
-// Close cierra el store, asegurando que todos los datos se escriban en el archivo antes de cerrarlo.
-// También libera cualquier recurso asociado con el archivo.
-func (s *Store) Close() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+// Append agrega un nuevo registro al Store.
+func (s *Store) Append(value []byte) (bytes uint64, off uint64, err error) {
+	s.mu.Lock()         // Bloquea el mutex para acceso exclusivo
+	defer s.mu.Unlock() // Desbloquea el mutex al salir de la función
 
-	// Escribe cualquier dato pendiente en el buffer al archivo.
-	if err := s.buf.Flush(); err != nil {
-		return err
+	if err := s.buf.Flush(); err != nil { // Vacía el buffer al archivo
+		return 0, 0, err // Retorna error si falla
 	}
-	// Cierra el archivo para liberar recursos.
-	return s.File.Close()
+
+	off = s.size                                                         // Asigna el offset actual
+	if err := binary.Write(s.buf, enc, uint64(len(value))); err != nil { // Escribe el tamaño del valor en el buffer
+		return 0, 0, err // Retorna error si falla
+	}
+	if err := binary.Write(s.buf, enc, value); err != nil { // Escribe el valor en el buffer
+		return 0, 0, err // Retorna error si falla
+	}
+
+	s.size += lenWidth + uint64(len(value)) // Incrementa el tamaño del Store
+
+	return uint64(lenWidth) + uint64(len(value)), off, nil // Retorna el número de bytes escritos y el offset
+}
+
+// Remove elimina el archivo del Store.
+func (s *Store) Remove() error {
+	if err := s.Close(); err != nil { // Cierra el Store
+		return err // Retorna error si falla
+	}
+	return os.Remove(s.Name()) // Elimina el archivo y retorna error si falla
+}
+
+// Close cierra el Store vaciando el buffer y cerrando el archivo.
+func (s *Store) Close() error {
+	if err := s.buf.Flush(); err != nil { // Vacía el buffer al archivo
+		return err // Retorna error si falla
+	}
+	return s.File.Close() // Cierra el archivo y retorna error si falla
 }

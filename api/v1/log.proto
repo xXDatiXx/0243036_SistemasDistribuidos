@@ -1,9 +1,34 @@
-syntax = "proto3";
-package log.v1;
+syntax = "proto3"; // Indica que estás usando Proto3
 
-option go_package = "github.com/Robinthatdoesnotsuck/api/log_v1";
+package api.v1;    // Este es el paquete protobuf
+
+// Aquí especificas el paquete Go que se generará
+option go_package = "github.com/dati/log/v1"; 
+
+service Log {
+    rpc Produce(ProduceRequest) returns (ProduceResponse) {}
+    rpc Consume(ConsumeRequest) returns (ConsumeResponse) {}
+    rpc ConsumeStream(ConsumeRequest) returns (stream ConsumeResponse) {}
+    rpc ProduceStream(stream ProduceRequest) returns (stream ProduceResponse) {}
+}
 
 message Record {
     bytes value = 1;
     uint64 offset = 2;
+}
+
+message ProduceRequest {
+    Record record = 1;
+}
+
+message ProduceResponse {
+    uint64 offset = 1;
+}
+
+message ConsumeRequest {
+    uint64 offset = 1;
+}
+
+message ConsumeResponse {
+    Record record = 2;
 }

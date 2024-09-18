@@ -1,11 +1,8 @@
 package log
 
 import (
-	"encoding/binary"
-	"fmt"
 	"io"
 	"os"
-	"sync"
 
 	"github.com/tysonmote/gommap"
 )
@@ -14,9 +11,9 @@ import (
 // offWidth es el tamaño del offset (4 bytes), posWidth es el tamaño de la posición (8 bytes),
 // y entWidth es el tamaño total de una entrada en el índice.
 var (
-	offWidth uint64 = 4
-	posWidth uint64 = 8
-	entWidth        = int(offWidth + posWidth) // Tamaño total de una entrada en el índice
+	offWidth uint64 = 4                   // Tamaño del offset en bytes
+	posWidth uint64 = 8                   // Tamaño de la posición en bytes
+	entWidth        = offWidth + posWidth // Tamaño total de una entrada en el índice
 )
 
 // Index representa el índice de un segmento, que mapea offsets a posiciones en el store.
@@ -24,149 +21,79 @@ type Index struct {
 	file *os.File    // Archivo en el cual se almacena el índice
 	mmap gommap.MMap // Mapeo de memoria para acceder al archivo del índice
 	size uint64      // Tamaño actual del índice en bytes
-	mu   sync.Mutex  // Mutex para asegurar acceso concurrente seguro
-}
-
-// Config es la estructura que contiene configuraciones específicas para el índice,
-// incluyendo el tamaño máximo permitido para el store y el índice.
-type Config struct {
-	Segment struct {
-		MaxStoreBytes uint64 // Tamaño máximo permitido para el store en bytes
-		MaxIndexBytes uint64 // Tamaño máximo permitido para el índice en bytes
-		InitialOffset uint64 // Offset inicial del segmento
-	}
 }
 
 // NewIndex crea un nuevo índice a partir de un archivo dado y configura el mapeo a memoria.
 // Devuelve una instancia de Index o un error si falla.
-func NewIndex(f *os.File, c Config) (*Index, error) {
-	// 1. Obtener el tamaño del archivo que vamos a indexar.
-	fi, err := f.Stat()
-	if err != nil {
-		fmt.Printf("Error al obtener el tamaño del archivo: %v\n", err)
-		return nil, err
-	}
-
-	// Inicializa una nueva instancia de Index con el archivo y su tamaño.
+func newIndex(f *os.File, c Config) (*Index, error) {
 	idx := &Index{
-		file: f,
-		size: uint64(fi.Size()),
+		file: f, // Asigna el archivo al índice
 	}
-
-	// Ajusta el tamaño del archivo de índice al tamaño máximo configurado.
-	if err := os.Truncate(f.Name(), int64(c.Segment.MaxIndexBytes)); err != nil {
-		fmt.Printf("Error al truncar el archivo: %v\n", err)
-		return nil, err
+	fi, err := os.Stat(f.Name()) // Obtiene información del archivo
+	if err != nil {
+		return nil, err // Retorna error si falla
 	}
-
-	// Mapea el archivo directamente a memoria utilizando gommap.
-	if idx.mmap, err = gommap.Map(idx.file.Fd(), gommap.PROT_READ|gommap.PROT_WRITE, gommap.MAP_SHARED); err != nil {
-		fmt.Printf("Error al mapear el archivo a memoria: %v\n", err)
-		return nil, err
+	idx.size = uint64(fi.Size()) // Asigna el tamaño del archivo al índice
+	if err = os.Truncate(
+		f.Name(), int64(c.Segment.MaxIndexBytes), // Trunca el archivo al tamaño máximo permitido
+	); err != nil {
+		return nil, err // Retorna error si falla
 	}
-
-	// Si el tamaño es 0, limpiar el mmap para asegurar que no haya datos basura.
-	if len(idx.mmap) > 0 && idx.size == 0 {
-		for i := range idx.mmap {
-			idx.mmap[i] = 0
-		}
+	if idx.mmap, err = gommap.Map(
+		idx.file.Fd(),                      // Mapea el archivo a memoria
+		gommap.PROT_READ|gommap.PROT_WRITE, // Permisos de lectura y escritura
+		gommap.MAP_SHARED,                  // Mapeo compartido
+	); err != nil {
+		return nil, err // Retorna error si falla
 	}
-
-	return idx, nil
+	return idx, nil // Retorna la instancia de Index
 }
 
 // Write escribe un offset y una posición en el índice.
 func (i *Index) Write(off uint32, pos uint64) error {
-	i.mu.Lock() // Bloquear para acceso seguro.
-	defer i.mu.Unlock()
-
-	// Verifica si hay suficiente espacio para escribir una nueva entrada.
-	if i.size+uint64(entWidth) > uint64(len(i.mmap)) {
-		fmt.Println("Error: No hay suficiente espacio en el índice para escribir una nueva entrada.")
-		return io.EOF
+	if uint64(len(i.mmap)) < i.size+entWidth { // Verifica si hay espacio suficiente en el mapeo
+		return io.EOF // Retorna error si no hay espacio
 	}
-
-	// Escribe el offset en el índice.
-	binary.BigEndian.PutUint32(i.mmap[i.size:], off)
-
-	// Escribir la posición asociada al offset en el índice.
-	binary.BigEndian.PutUint64(i.mmap[i.size+uint64(offWidth):], pos)
-
-	// Incrementar el tamaño del índice para reflejar la nueva entrada.
-	i.size += uint64(entWidth)
-
-	return nil
+	enc.PutUint32(i.mmap[i.size:i.size+offWidth], off)          // Escribe el offset en el mapeo
+	enc.PutUint64(i.mmap[i.size+offWidth:i.size+entWidth], pos) // Escribe la posición en el mapeo
+	i.size += uint64(entWidth)                                  // Incrementa el tamaño del índice
+	return nil                                                  // Retorna nil si no hay errores
 }
 
 // Read lee una entrada desde el índice basado en el número de entrada especificado.
 func (i *Index) Read(in int64) (out uint32, pos uint64, err error) {
-	i.mu.Lock() // Bloquear para acceso seguro.
-	defer i.mu.Unlock()
-
-	// Verificar si el índice contiene registros.
-	if i.size == 0 {
-		fmt.Println("Error: No hay registros en el índice.")
-		return 0, 0, io.EOF
+	if i.size == 0 { // Verifica si el índice está vacío
+		return 0, 0, io.EOF // Retorna error si está vacío
 	}
-
-	// Si in es -1, que significa que la última entrada en el índice.
-	if in == -1 {
-		out = uint32((i.size / uint64(entWidth)) - 1)
-		offsetPos := i.size - uint64(entWidth)
-
-		// Leer la posición desde la última entrada en el índice.
-		pos = binary.BigEndian.Uint64(i.mmap[offsetPos+uint64(offWidth):])
-
-		return out, pos, nil
+	if in == -1 { // Si el número de entrada es -1
+		out = uint32((i.size / entWidth) - 1) // Lee la última entrada
+	} else {
+		out = uint32(in) // Lee la entrada especificada
 	}
-
-	// Calcular la posición de la entrada solicitada.
-	entryOffset := uint64(in) * uint64(entWidth)
-	if in < 0 || entryOffset >= i.size {
-		fmt.Println("Error: Entrada fuera de los límites del índice.")
-		return 0, 0, io.EOF
+	pos = uint64(out) * entWidth // Calcula la posición en el mapeo
+	if i.size < pos+entWidth {   // Verifica si la posición está fuera de rango
+		return 0, 0, io.EOF // Retorna error si está fuera de rango
 	}
-
-	// Leer el offset y la posición desde el índice.
-	out = binary.BigEndian.Uint32(i.mmap[entryOffset:])
-	pos = binary.BigEndian.Uint64(i.mmap[entryOffset+uint64(offWidth):])
-
-	return out, pos, nil
+	out = enc.Uint32(i.mmap[pos : pos+offWidth])          // Lee el offset desde el mapeo
+	pos = enc.Uint64(i.mmap[pos+offWidth : pos+entWidth]) // Lee la posición desde el mapeo
+	return out, pos, nil                                  // Retorna el offset y la posición
 }
 
 // Close cierra el archivo del índice, asegurando que todos los cambios se escriban en el disco.
 func (i *Index) Close() error {
-	i.mu.Lock() // Bloquear para acceso seguro.
-	defer i.mu.Unlock()
-
-	// Hace flush de los datos en memoria al archivo.
-	if err := i.mmap.Sync(gommap.MS_SYNC); err != nil {
-		fmt.Printf("Error al sincronizar el mmap con el archivo: %v\n", err)
-		return err
+	if err := i.mmap.Sync(gommap.MS_SYNC); err != nil { // Sincroniza el mapeo con el disco
+		return err // Retorna error si falla
 	}
-
-	// Sincroniza el archivo para que todos los datos se escriban en el disco.
-	if err := i.file.Sync(); err != nil {
-		fmt.Printf("Error al sincronizar el archivo: %v\n", err)
-		return err
+	if err := i.file.Sync(); err != nil { // Sincroniza el archivo con el disco
+		return err // Retorna error si falla
 	}
-
-	// Limitar el archivo para que tenga el tamaño exacto de su contenido.
-	if err := i.file.Truncate(int64(i.size)); err != nil {
-		fmt.Printf("Error al truncar el archivo: %v\n", err)
-		return err
+	if err := i.file.Truncate(int64(i.size)); err != nil { // Trunca el archivo al tamaño actual del índice
+		return err // Retorna error si falla
 	}
-
-	// Cierra el archivo.
-	if err := i.file.Close(); err != nil {
-		fmt.Printf("Error al cerrar el archivo: %v\n", err)
-		return err
-	}
-
-	return nil
+	return i.file.Close() // Cierra el archivo y retorna nil si no hay errores
 }
 
 // Name devuelve el nombre del archivo asociado con el índice.
 func (i *Index) Name() string {
-	return i.file.Name()
+	return i.file.Name() // Retorna el nombre del archivo
 }

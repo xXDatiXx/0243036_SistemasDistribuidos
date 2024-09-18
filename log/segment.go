@@ -2,170 +2,137 @@ package log
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"path"
 
-	log_v1 "github.com/dati/api/v1" // Importa el paquete generado automáticamente por Protobuf
+	api "github.com/dati/api/v1"
 
 	"google.golang.org/protobuf/proto"
 )
 
-// Representa un segmento dentro del log.
-// Cada segmento contiene un store para almacenar registros y un index para
-// mapear offsets a posiciones dentro del store.
+// Segment representa un segmento del log, que contiene un store y un índice.
 type Segment struct {
-	store                  *Store // Almacena los datos en formato binario
-	index                  *Index // Índice que mapea offsets a posiciones dentro del store
-	baseOffset, nextOffset uint64 // baseOffset es el offset inicial del segmento, nextOffset es el siguiente offset disponible
-	config                 Config // Configuración del segmento (tamaños máximos de store e index)
+	store                  *Store // Almacena los registros
+	index                  *Index // Índice para buscar registros en el store
+	baseOffset, nextOffset uint64 // Offsets base y siguiente del segmento
+	config                 Config // Configuración del segmento
 }
 
-// Crea un nuevo segmento con el baseOffset dado y lo inicializa.
-// Los archivos .store y .index se crean y se inicializan en el directorio segments, especificado
-// en server.go.
+// NewSegment crea un nuevo segmento en el directorio especificado con el offset base y configuración dados.
 func NewSegment(dir string, baseOffset uint64, c Config) (*Segment, error) {
 	s := &Segment{
-		baseOffset: baseOffset,
-		config:     c,
+		baseOffset: baseOffset, // Asigna el offset base
+		config:     c,          // Asigna la configuración
 	}
-
 	var err error
-
-	// Abre o crea el archivo store correspondiente a este segmento.
 	storeFile, err := os.OpenFile(
-		path.Join(dir, fmt.Sprintf("%d%s", baseOffset, ".store")),
-		os.O_RDWR|os.O_CREATE|os.O_APPEND,
-		0644,
+		path.Join(dir, fmt.Sprintf("%d%s", baseOffset, ".store")), // Crea el archivo store
+		os.O_RDWR|os.O_CREATE|os.O_APPEND,                         // Abre el archivo con permisos de lectura/escritura y creación
+		0644,                                                      // Permisos del archivo
 	)
 	if err != nil {
-		return nil, err
+		return nil, err // Retorna error si falla
 	}
-	if s.store, err = NewStore(storeFile); err != nil {
-		return nil, err
+	if s.store, err = newStore(storeFile); err != nil {
+		return nil, err // Retorna error si falla al crear el store
 	}
-
-	// Abre o crea el archivo index correspondiente a este segmento.
 	indexFile, err := os.OpenFile(
-		path.Join(dir, fmt.Sprintf("%d%s", baseOffset, ".index")),
-		os.O_RDWR|os.O_CREATE,
-		0644,
+		path.Join(dir, fmt.Sprintf("%d%s", baseOffset, ".index")), // Crea el archivo índice
+		os.O_RDWR|os.O_CREATE,                                     // Abre el archivo con permisos de lectura/escritura y creación
+		0644,                                                      // Permisos del archivo
 	)
 	if err != nil {
-		return nil, err
+		return nil, err // Retorna error si falla
 	}
-	if s.index, err = NewIndex(indexFile, c); err != nil {
-		return nil, err
+	if s.index, err = newIndex(indexFile, c); err != nil {
+		return nil, err // Retorna error si falla al crear el índice
 	}
-
-	// Si el índice tiene registros, ajusta nextOffset para continuar desde el último offset.
 	if off, _, err := s.index.Read(-1); err != nil {
-		s.nextOffset = baseOffset
+		s.nextOffset = baseOffset // Asigna el offset base si falla la lectura del índice
 	} else {
-		s.nextOffset = baseOffset + uint64(off) + 1
+		s.nextOffset = baseOffset + uint64(off) + 1 // Calcula el siguiente offset
 	}
 
-	return s, nil
+	return s, nil // Retorna el segmento creado
 }
 
-// Append agrega un nuevo record al segmento.
-// Serializa el record usando Protobuf, lo almacena en el store,
-// y luego actualiza el índice con la posición del record en el store.
-func (s *Segment) Append(record *log_v1.Record) (uint64, error) {
-	// Verifica si el segmento ha alcanzado su tamaño máximo.
-	if s.IsMaxed() {
-		return 0, io.EOF
-	}
+// Append agrega un nuevo registro al segmento.
+func (s *Segment) Append(record *api.Record) (uint64, error) {
+	current_offset := s.nextOffset // Asigna el offset actual
+	record.Offset = current_offset // Asigna el offset al registro
 
-	// Asigna el próximo offset disponible al record.
-	offset := s.nextOffset
-	record.Offset = offset
-
-	// Serializa el record a formato binario.
-	p, err := proto.Marshal(record)
+	value, err := proto.Marshal(record) // Serializa el registro
 	if err != nil {
-		return 0, err
+		return 0, err // Retorna error si falla
 	}
 
-	// Almacena el record en el store y obtiene su posición.
-	pos, _, err := s.store.Append(p)
+	_, pos, err := s.store.Append(value) // Agrega el valor serializado al store
 	if err != nil {
-		return 0, err
+		return 0, err // Retorna error si falla
 	}
-
-	// Actualiza el índice con el offset relativo y la posición en el store.
 	if err = s.index.Write(
-		uint32(s.nextOffset-uint64(s.baseOffset)),
-		pos,
+		uint32(s.nextOffset-uint64(s.baseOffset)), // Calcula el offset relativo
+		pos, // Posición en el store
 	); err != nil {
-		return 0, err
+		return 0, err // Retorna error si falla
 	}
 
-	// Incrementa el nextOffset para el siguiente record.
-	s.nextOffset++
-	return offset, nil
+	s.nextOffset++             // Incrementa el siguiente offset
+	return current_offset, nil // Retorna el offset actual
 }
 
-// Read lee un record desde el segmento basado en el offset dado.
-// Usa el índice para encontrar la posición correcta en el store y luego
-// deserializa el record desde esa posición.
-func (s *Segment) Read(off uint64) (*log_v1.Record, error) {
-	// Encuentra la posición del record en el store usando el índice.
-	_, pos, err := s.index.Read(int64(off - s.baseOffset))
+// Read lee un registro del segmento basado en el offset.
+func (s *Segment) Read(off uint64) (*api.Record, error) {
+	_, pos, err := s.index.Read(int64(off - s.baseOffset)) // Lee la posición desde el índice
 	if err != nil {
-		return nil, err
+		return nil, err // Retorna error si falla
+	}
+	record := &api.Record{}              // Crea un nuevo registro
+	record.Offset = off                  // Asigna el offset al registro
+	temp_value, err := s.store.Read(pos) // Lee el valor desde el store
+
+	if err != nil {
+		return nil, err // Retorna error si falla
 	}
 
-	// Lee el record desde la posición en el store.
-	p, err := s.store.Read(pos)
-	if err != nil {
-		return nil, err
+	if err = proto.Unmarshal(temp_value, record); err != nil {
+		return nil, err // Retorna error si falla la deserialización
 	}
 
-	// Deserializa el record desde el formato binario.
-	record := &log_v1.Record{}
-	err = proto.Unmarshal(p, record)
-	return record, err
+	return record, err // Retorna el registro leído
 }
 
 // IsMaxed verifica si el segmento ha alcanzado su tamaño máximo.
-// Revisa tanto el tamaño del store como el del índice para determinar si el
-// segmento está "lleno" y ya no puede aceptar más registros.
 func (s *Segment) IsMaxed() bool {
-	// Verifica si el tamaño del store ha alcanzado su límite máximo
-	if s.store.size >= s.config.Segment.MaxStoreBytes {
-		return true
-	}
-
-	// Verifica si el tamaño del índice ha alcanzado su límite máximo
-	if s.index.size >= s.config.Segment.MaxIndexBytes {
-		return true
-	}
-
-	// Si ninguno de los dos ha alcanzado su límite, devuelve false
-	return false
+	return s.store.size >= s.config.Segment.MaxStoreBytes || s.index.size >= s.config.Segment.MaxIndexBytes
 }
 
-// Remove elimina los archivos del segmento del sistema de archivos.
-// Primero cierra los archivos, luego los elimina.
+// Remove elimina el segmento cerrando y eliminando sus archivos.
 func (s *Segment) Remove() error {
-	// Cierra los archivos del segmento.
 	if err := s.Close(); err != nil {
-		return err
+		return err // Retorna error si falla al cerrar
 	}
-
-	// Elimina los archivos del índice y el store.
 	if err := os.Remove(s.index.Name()); err != nil {
-		return err
+		return err // Retorna error si falla al eliminar el índice
 	}
-	return os.Remove(s.store.Name())
+	if err := os.Remove(s.store.Name()); err != nil {
+		return err // Retorna error si falla al eliminar el store
+	}
+	return nil // Retorna nil si no hay errores
 }
 
-// Close cierra los archivos del segmento, asegurando que todos los cambios
-// se escriban en disco antes de cerrar.
+// Close cierra el segmento cerrando el índice y el store.
 func (s *Segment) Close() error {
-	if err := s.store.Close(); err != nil {
-		return err
+	if err := s.index.Close(); err != nil {
+		return err // Retorna error si falla al cerrar el índice
 	}
-	return s.index.Close()
+	if err := s.store.Close(); err != nil {
+		return err // Retorna error si falla al cerrar el store
+	}
+	return nil // Retorna nil si no hay errores
+}
+
+// Name devuelve el nombre del segmento basado en sus offsets.
+func (s *Segment) Name() string {
+	return fmt.Sprintf("%d-%d", s.baseOffset, s.nextOffset) // Formatea y retorna el nombre del segmento
 }

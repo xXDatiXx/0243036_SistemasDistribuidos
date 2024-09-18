@@ -4,7 +4,7 @@ Content-Type: application/json
 
 {
     "value": "SGVsbG8gV29ybGQ=",
-    "offset": 0
+    "offset": 1
 }
 
 

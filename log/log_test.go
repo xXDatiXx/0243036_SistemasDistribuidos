@@ -1,11 +1,11 @@
 package log
 
 import (
-	"io"
+	"io/ioutil"
 	"os"
 	"testing"
 
-	log_v1 "github.com/dati/api/v1"
+	api "github.com/dati/api/v1"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 )
@@ -21,7 +21,7 @@ func TestLog(t *testing.T) {
 		"truncate":                          testTruncate,
 	} {
 		t.Run(scenario, func(t *testing.T) {
-			dir, err := os.MkdirTemp("", "store-test")
+			dir, err := ioutil.TempDir("", "store-test")
 			require.NoError(t, err)
 			defer os.RemoveAll(dir)
 
@@ -29,42 +29,31 @@ func TestLog(t *testing.T) {
 			c.Segment.MaxStoreBytes = 32
 			log, err := NewLog(dir, c)
 			require.NoError(t, err)
-
 			fn(t, log)
 		})
 	}
 }
 
-// END: intro
-
-// START: append_read
 func testAppendRead(t *testing.T, log *Log) {
-	append := &log_v1.Record{
+	append := &api.Record{
 		Value: []byte("hello world"),
 	}
 	off, err := log.Append(append)
 	require.NoError(t, err)
 	require.Equal(t, uint64(0), off)
-
 	read, err := log.Read(off)
 	require.NoError(t, err)
 	require.Equal(t, append.Value, read.Value)
 }
 
-// END: append_read
-
-// START: out_of_range
 func testOutOfRangeErr(t *testing.T, log *Log) {
 	read, err := log.Read(1)
 	require.Nil(t, read)
 	require.Error(t, err)
 }
 
-// END: out_of_range
-
-// START: init_existing
 func testInitExisting(t *testing.T, o *Log) {
-	append := &log_v1.Record{
+	append := &api.Record{
 		Value: []byte("hello world"),
 	}
 	for i := 0; i < 3; i++ {
@@ -72,17 +61,14 @@ func testInitExisting(t *testing.T, o *Log) {
 		require.NoError(t, err)
 	}
 	require.NoError(t, o.Close())
-
 	off, err := o.LowestOffset()
 	require.NoError(t, err)
 	require.Equal(t, uint64(0), off)
 	off, err = o.HighestOffset()
 	require.NoError(t, err)
 	require.Equal(t, uint64(2), off)
-
 	n, err := NewLog(o.Dir, o.Config)
 	require.NoError(t, err)
-
 	off, err = n.LowestOffset()
 	require.NoError(t, err)
 	require.Equal(t, uint64(0), off)
@@ -91,42 +77,32 @@ func testInitExisting(t *testing.T, o *Log) {
 	require.Equal(t, uint64(2), off)
 }
 
-// END: init_existing
-
-// START: reader
 func testReader(t *testing.T, log *Log) {
-	append := &log_v1.Record{
+	append := &api.Record{
 		Value: []byte("hello world"),
 	}
 	off, err := log.Append(append)
 	require.NoError(t, err)
 	require.Equal(t, uint64(0), off)
-
 	reader := log.Reader()
-	b, err := io.ReadAll(reader)
+	b, err := ioutil.ReadAll(reader)
 	require.NoError(t, err)
-
-	read := &log_v1.Record{}
+	read := &api.Record{}
 	err = proto.Unmarshal(b[lenWidth:], read)
 	require.NoError(t, err)
 	require.Equal(t, append.Value, read.Value)
 }
 
-// END: reader
-
-// START: truncate
 func testTruncate(t *testing.T, log *Log) {
-	append := &log_v1.Record{
+	append := &api.Record{
 		Value: []byte("hello world"),
 	}
 	for i := 0; i < 3; i++ {
 		_, err := log.Append(append)
 		require.NoError(t, err)
 	}
-
 	err := log.Truncate(1)
 	require.NoError(t, err)
-
 	_, err = log.Read(0)
 	require.Error(t, err)
 }
