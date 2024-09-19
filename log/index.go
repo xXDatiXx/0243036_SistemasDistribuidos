@@ -1,6 +1,6 @@
 package log
 
-//que permite mapear las posiciones de los registros a las posiciones en el archivo físico. 
+//que permite mapear las posiciones de los registros a las posiciones en el archivo físico.
 // El índice facilita la búsqueda rápida de registros en el almacenamiento.
 
 import (
@@ -19,17 +19,17 @@ var (
 	entWidth        = offWidth + posWidth // Tamaño total de una entrada en el índice
 )
 
-// Index representa el índice de un segmento, que mapea offsets a posiciones en el store.
-type Index struct {
+// index representa el índice de un segmento, que mapea offsets a posiciones en el store.
+type index struct {
 	file *os.File    // Archivo en el cual se almacena el índice
 	mmap gommap.MMap // Mapeo de memoria para acceder al archivo del índice
 	size uint64      // Tamaño actual del índice en bytes
 }
 
-// NewIndex crea un nuevo índice a partir de un archivo dado y configura el mapeo a memoria.
-// Devuelve una instancia de Index o un error si falla.
-func newIndex(f *os.File, c Config) (*Index, error) {
-	idx := &Index{
+// Newindex crea un nuevo índice a partir de un archivo dado y configura el mapeo a memoria.
+// Devuelve una instancia de index o un error si falla.
+func newIndex(f *os.File, c Config) (*index, error) {
+	idx := &index{
 		file: f, // Asigna el archivo al índice
 	}
 	fi, err := os.Stat(f.Name()) // Obtiene información del archivo
@@ -49,11 +49,11 @@ func newIndex(f *os.File, c Config) (*Index, error) {
 	); err != nil {
 		return nil, err // Retorna error si falla
 	}
-	return idx, nil // Retorna la instancia de Index
+	return idx, nil // Retorna la instancia de index
 }
 
 // Write escribe un offset y una posición en el índice.
-func (i *Index) Write(off uint32, pos uint64) error {
+func (i *index) Write(off uint32, pos uint64) error {
 	if uint64(len(i.mmap)) < i.size+entWidth { // Verifica si hay espacio suficiente en el mapeo
 		return io.EOF // Retorna error si no hay espacio
 	}
@@ -64,7 +64,7 @@ func (i *Index) Write(off uint32, pos uint64) error {
 }
 
 // Lee el índice y retorna el offset y la posición en el archivo.
-func (i *Index) Read(in int64) (out uint32, pos uint64, err error) {
+func (i *index) Read(in int64) (out uint32, pos uint64, err error) {
 	if i.size == 0 { // Verifica si el índice está vacío
 		return 0, 0, io.EOF // Retorna error si está vacío
 	}
@@ -83,7 +83,7 @@ func (i *Index) Read(in int64) (out uint32, pos uint64, err error) {
 }
 
 // Close cierra el archivo del índice, asegurando que todos los cambios se escriban en el disco.
-func (i *Index) Close() error {
+func (i *index) Close() error {
 	if err := i.mmap.Sync(gommap.MS_SYNC); err != nil { // Sincroniza el mapeo con el disco
 		return err // Retorna error si falla
 	}
@@ -97,6 +97,6 @@ func (i *Index) Close() error {
 }
 
 // Name devuelve el nombre del archivo asociado con el índice.
-func (i *Index) Name() string {
+func (i *index) Name() string {
 	return i.file.Name() // Retorna el nombre del archivo
 }

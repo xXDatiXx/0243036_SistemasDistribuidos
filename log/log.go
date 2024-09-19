@@ -1,10 +1,9 @@
 package log
 
-// Este archivo define la estructura principal de un Log, que contiene múltiples segmentos 
+// Este archivo define la estructura principal de un Log, que contiene múltiples segmentos
 // y maneja la configuración general.
 
 import (
-	"fmt"
 	"io"
 	"os"
 	"path"
@@ -16,16 +15,6 @@ import (
 	api "github.com/dati/api/v1"
 )
 
-// Config es la estructura que contiene configuraciones específicas para el índice,
-// incluyendo el tamaño máximo permitido para el store y el índice.
-type Config struct {
-	Segment struct {
-		MaxStoreBytes uint64 // Tamaño máximo permitido para el store
-		MaxIndexBytes uint64 // Tamaño máximo permitido para el índice
-		InitialOffset uint64 // Offset inicial
-	}
-}
-
 // Log es la estructura principal que contiene los segmentos y la configuración.
 type Log struct {
 	mu sync.RWMutex // Mutex para proteger el acceso concurrente
@@ -33,8 +22,8 @@ type Log struct {
 	Dir    string // Directorio donde se almacenan los segmentos
 	Config Config // Configuración del log
 
-	activeSegment *Segment   // Segmento activo actual
-	segments      []*Segment // Lista de todos los segmentos
+	activeSegment *segment   // Segmento activo actual
+	segments      []*segment // Lista de todos los segmentos
 }
 
 // NewLog crea una nueva instancia de Log y recibe la Configuración.
@@ -104,7 +93,7 @@ func (l *Log) Append(record *api.Record) (uint64, error) {
 func (l *Log) Read(off uint64) (*api.Record, error) {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
-	var s *Segment
+	var s *segment
 	for _, segment := range l.segments {
 		if segment.baseOffset <= off && off < segment.nextOffset {
 			s = segment // Encuentra el segmento que contiene el offset
@@ -112,7 +101,7 @@ func (l *Log) Read(off uint64) (*api.Record, error) {
 		}
 	}
 	if s == nil || s.nextOffset <= off {
-		return nil, fmt.Errorf("offset out of range: %d", off) // Retorna error si el offset está fuera de rango
+		return nil, api.ErrOffsetOutOfRange{Offset: off}
 	}
 	return s.Read(off) // Lee el registro del segmento
 }
@@ -178,7 +167,7 @@ func (l *Log) HighestOffset() (uint64, error) {
 func (l *Log) Truncate(lowest uint64) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	var segments []*Segment
+	var segments []*segment
 	for _, s := range l.segments {
 		if s.nextOffset <= lowest+1 {
 			if err := s.Remove(); err != nil {

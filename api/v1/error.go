@@ -7,8 +7,6 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// Código proporcionado de los status de error para el api
-
 type ErrOffsetOutOfRange struct {
 	Offset uint64
 }
@@ -16,14 +14,14 @@ type ErrOffsetOutOfRange struct {
 func (e ErrOffsetOutOfRange) GRPCStatus() *status.Status {
 	st := status.New(
 		404,
-		fmt.Sprintf("offset fuera de rango: %d", e.Offset),
+		fmt.Sprintf("offset out of range: %d", e.Offset),
 	)
 	msg := fmt.Sprintf(
-		"El offset solicitado está fuera del rango del log: %d",
+		"The requested offset is outside the log's range: %d",
 		e.Offset,
 	)
 	d := &errdetails.LocalizedMessage{
-		Locale:  "es-MX",
+		Locale:  "en-US",
 		Message: msg,
 	}
 	std, err := st.WithDetails(d)

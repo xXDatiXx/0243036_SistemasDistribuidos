@@ -1,6 +1,6 @@
 package log
 
-// Define la estructura de Segment, que contiene un Store (almacenamiento de 
+// Define la estructura de segment, que contiene un Store (almacenamiento de
 // registros) y un Index (índice de posiciones).
 
 import (
@@ -13,17 +13,17 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// Segment representa un segmento del log, que contiene un store y un índice.
-type Segment struct {
+// segment representa un segmento del log, que contiene un store y un índice.
+type segment struct {
 	store                  *Store // Almacena los registros
-	index                  *Index // Índice para buscar registros en el store
+	index                  *index // Índice para buscar registros en el store
 	baseOffset, nextOffset uint64 // Offsets base y siguiente del segmento
 	config                 Config // Configuración del segmento
 }
 
-// NewSegment crea un nuevo segmento en el directorio especificado con el offset base y configuración dados.
-func NewSegment(dir string, baseOffset uint64, c Config) (*Segment, error) {
-	s := &Segment{
+// Newsegment crea un nuevo segmento en el directorio especificado con el offset base y configuración dados.
+func NewSegment(dir string, baseOffset uint64, c Config) (*segment, error) {
+	s := &segment{
 		baseOffset: baseOffset, // Asigna el offset base
 		config:     c,          // Asigna la configuración
 	}
@@ -60,7 +60,7 @@ func NewSegment(dir string, baseOffset uint64, c Config) (*Segment, error) {
 }
 
 // Append agrega un nuevo registro al segmento.
-func (s *Segment) Append(record *api.Record) (uint64, error) {
+func (s *segment) Append(record *api.Record) (uint64, error) {
 	current_offset := s.nextOffset // Asigna el offset actual
 	record.Offset = current_offset // Asigna el offset al registro
 
@@ -85,7 +85,7 @@ func (s *Segment) Append(record *api.Record) (uint64, error) {
 }
 
 // Read lee un registro del segmento basado en el offset.
-func (s *Segment) Read(off uint64) (*api.Record, error) {
+func (s *segment) Read(off uint64) (*api.Record, error) {
 	_, pos, err := s.index.Read(int64(off - s.baseOffset)) // Lee la posición desde el índice
 	if err != nil {
 		return nil, err // Retorna error si falla
@@ -106,12 +106,12 @@ func (s *Segment) Read(off uint64) (*api.Record, error) {
 }
 
 // IsMaxed verifica si el segmento ha alcanzado su tamaño máximo.
-func (s *Segment) IsMaxed() bool {
+func (s *segment) IsMaxed() bool {
 	return s.store.size >= s.config.Segment.MaxStoreBytes || s.index.size >= s.config.Segment.MaxIndexBytes
 }
 
 // Remove elimina el segmento cerrando y eliminando sus archivos.
-func (s *Segment) Remove() error {
+func (s *segment) Remove() error {
 	if err := s.Close(); err != nil {
 		return err // Retorna error si falla al cerrar
 	}
@@ -125,7 +125,7 @@ func (s *Segment) Remove() error {
 }
 
 // Close cierra el segmento cerrando el índice y el store.
-func (s *Segment) Close() error {
+func (s *segment) Close() error {
 	if err := s.index.Close(); err != nil {
 		return err // Retorna error si falla al cerrar el índice
 	}
@@ -136,6 +136,6 @@ func (s *Segment) Close() error {
 }
 
 // Name devuelve el nombre del segmento basado en sus offsets.
-func (s *Segment) Name() string {
+func (s *segment) Name() string {
 	return fmt.Sprintf("%d-%d", s.baseOffset, s.nextOffset) // Formatea y retorna el nombre del segmento
 }
