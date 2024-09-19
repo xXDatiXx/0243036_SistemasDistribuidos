@@ -1,5 +1,8 @@
 package log
 
+//que permite mapear las posiciones de los registros a las posiciones en el archivo físico. 
+// El índice facilita la búsqueda rápida de registros en el almacenamiento.
+
 import (
 	"io"
 	"os"
@@ -60,7 +63,7 @@ func (i *Index) Write(off uint32, pos uint64) error {
 	return nil                                                  // Retorna nil si no hay errores
 }
 
-// Read lee una entrada desde el índice basado en el número de entrada especificado.
+// Lee el índice y retorna el offset y la posición en el archivo.
 func (i *Index) Read(in int64) (out uint32, pos uint64, err error) {
 	if i.size == 0 { // Verifica si el índice está vacío
 		return 0, 0, io.EOF // Retorna error si está vacío

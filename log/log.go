@@ -1,5 +1,8 @@
 package log
 
+// Este archivo define la estructura principal de un Log, que contiene múltiples segmentos 
+// y maneja la configuración general.
+
 import (
 	"fmt"
 	"io"
@@ -34,7 +37,7 @@ type Log struct {
 	segments      []*Segment // Lista de todos los segmentos
 }
 
-// NewLog crea una nueva instancia de Log.
+// NewLog crea una nueva instancia de Log y recibe la Configuración.
 func NewLog(dir string, c Config) (*Log, error) {
 	if c.Segment.MaxStoreBytes == 0 {
 		c.Segment.MaxStoreBytes = 1024 // Valor por defecto para MaxStoreBytes

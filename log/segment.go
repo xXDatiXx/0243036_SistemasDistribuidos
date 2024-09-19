@@ -1,5 +1,8 @@
 package log
 
+// Define la estructura de Segment, que contiene un Store (almacenamiento de 
+// registros) y un Index (índice de posiciones).
+
 import (
 	"fmt"
 	"os"

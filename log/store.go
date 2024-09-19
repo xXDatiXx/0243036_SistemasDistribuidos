@@ -1,5 +1,8 @@
 package log
 
+// Este archivo maneja el almacenamiento físico de los registros en el sistema de archivos.
+
+
 import (
 	"bufio"
 	"encoding/binary"

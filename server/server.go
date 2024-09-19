@@ -1,5 +1,7 @@
 package server
 
+// Define el servidor gRPC que expone las funcionalidades del log.
+
 import (
 	"context"
 
@@ -25,7 +27,7 @@ func NewGRPCServer(commitlog *log.Log) (srv *grpcServer, err error) {
 	return srv, nil // Retorna la nueva instancia de grpcServer
 }
 
-// Produce maneja la solicitud de producción de registros
+// Agrega un nuevo registro al log.
 func (s *grpcServer) Produce(ctx context.Context, req *api.ProduceRequest) (*api.ProduceResponse, error) {
 	offset, err := s.CommitLog.Append(req.Record) // Agrega el registro al log de commits
 	if err != nil {
@@ -34,7 +36,7 @@ func (s *grpcServer) Produce(ctx context.Context, req *api.ProduceRequest) (*api
 	return &api.ProduceResponse{Offset: offset}, nil // Retorna la respuesta con el offset del registro
 }
 
-// Consume maneja la solicitud de consumo de registros
+// Lee un registro del log basado en el offset.
 func (s *grpcServer) Consume(ctx context.Context, req *api.ConsumeRequest) (*api.ConsumeResponse, error) {
 	record, err := s.CommitLog.Read(req.Offset) // Lee el registro del log de commits
 	if err != nil {
