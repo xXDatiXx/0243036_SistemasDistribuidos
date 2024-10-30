@@ -1,0 +1,16 @@
+{
+    "CN" : "CA Perron",
+    "key": {
+        "algo": "rsa",
+        "size": 2048
+    },
+    "names": [
+        {
+            "C": "MX",
+            "L": "Benito Juarez",
+            "ST": "Mexico City",
+            "O": "UP",
+            "OU": "CA Services"
+        }
+    ]
+}

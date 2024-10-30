@@ -1,0 +1,20 @@
+{
+    "MX": "127.0.0.1",
+    "hosts": [
+        "localhost",
+        "127.0.0.1"
+    ],
+    "key": {
+        "algo": "rsa",
+        "size": 2048
+    },
+    "names": [
+        {
+            "C": "MX",
+            "L": "Benito Juarez",
+            "ST": "Mexico City",
+            "O": "UP",
+            "OU": "Distributed Services"
+        }
+    ]
+}
