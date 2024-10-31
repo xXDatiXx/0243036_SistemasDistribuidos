@@ -27,5 +27,5 @@ func configFile(filename string) string {
 	}
 
 	// modify this
-	return filepath.Join(homeDir, "/home/dati/Desktop/UP/0243036_SistemasDistribuidos", filename)
+	return filepath.Join(homeDir, "/Desktop/UP/0243036_SistemasDistribuidos/.cert", filename)
 }

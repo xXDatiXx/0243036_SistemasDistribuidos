@@ -1,6 +1,6 @@
 # Esto nos ayuda a posicionar nuestros config files en una carpeta dentro de nuestro proyecto
 
-CONFIG_PATH=/home/dati/Desktop/UP/0243036_SistemasDistribuidos
+CONFIG_PATH=/home/dati/Desktop/UP/0243036_SistemasDistribuidos/.cert
 
 .PHONY: init
 
